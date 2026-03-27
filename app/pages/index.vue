@@ -5,6 +5,7 @@ import { ref, onMounted } from 'vue';
 const { $auth, $db } = useNuxtApp();
 const users = ref([]);
 const currentUser = ref(null);
+const searchQuery = ref("");
 const showLoveAnimation = ref(false);
 
 // --- AUDIO SETTINGS ✨ ---
@@ -14,6 +15,31 @@ const playNotification = () => {
   const audio = new Audio(NOTIFICATION_SOUND);
   audio.volume = 0.5;
   audio.play().catch(() => {});
+};
+
+// --- NOTIFICATION SETUP ---
+const setupNotifications = async (user) => {
+  if (process.server) return; // Wajib: Jangan jalankan di server!
+
+  try {
+    const messaging = getMessaging();
+    const permission = await Notification.requestPermission();
+    
+    if (permission === 'granted') {
+      const token = await getToken(messaging, { 
+        vapidKey: 'BHXeJv7ukgU-Q6T4TWqHmhabFH5r6aLMoPgnydVi1kHedmLkM6wEMo31v6HxO7FBD6QJvDbfz6orSULjWwbs2s0' 
+      });
+
+      if (token) {
+        console.log("Token FCM Berhasil Didapat:", token);
+        await updateDoc(doc($db, "users", user.uid), {
+          fcmToken: token
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Gagal setting notifikasi:", error);
+  }
 };
 
 // Update status aktif kita sendiri
@@ -31,6 +57,14 @@ const triggerLoveAnimation = () => {
   setTimeout(() => {
     showLoveAnimation.value = false;
   }, 1000);
+};
+
+// Filter users berdasarkan search
+const filteredUsers = () => {
+  if (!searchQuery.value) return users.value;
+  return users.value.filter(user => 
+    user.displayName?.toLowerCase().includes(searchQuery.value.toLowerCase())
+  );
 };
 
 onMounted(() => {
@@ -53,7 +87,7 @@ onMounted(() => {
           uid: doc.id,
           ...data,
           isOnline,
-          lastMessage: "Belum ada pesan",
+          lastMessage: "💬 Belum ada pesan",
           unreadCount: 0,
           lastMsgStatus: "",
           lastMsgTime: null
@@ -88,11 +122,11 @@ onMounted(() => {
 
           if (latestMsg) {
             if (latestMsg.audioUrl) {
-              usersData[index].lastMessage = "🎙️ Pesan Suara";
+              usersData[index].lastMessage = "🎙️ Pesan suara";
             } else if (latestMsg.imageUrl) {
               usersData[index].lastMessage = "📷 Foto";
             } else if (latestMsg.text) {
-              usersData[index].lastMessage = latestMsg.text.length > 30 ? latestMsg.text.substring(0, 30) + "..." : latestMsg.text;
+              usersData[index].lastMessage = latestMsg.text.length > 35 ? latestMsg.text.substring(0, 35) + "..." : latestMsg.text;
             }
             
             if (latestMsg.senderId === user.uid) {
@@ -119,7 +153,7 @@ onMounted(() => {
               } else if (diffDays < 7) {
                 usersData[index].lastMsgTime = `${diffDays} hari lalu`;
               } else {
-                usersData[index].lastMsgTime = msgDate.toLocaleDateString('id-ID');
+                usersData[index].lastMsgTime = msgDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
               }
             }
           }
@@ -133,12 +167,20 @@ onMounted(() => {
           usersData[index].unreadCount = incomingMsgs.length;
         });
 
-        // Sort by last message time
+        // Sort by last message time (pesan terbaru di atas)
         usersData.sort((a, b) => {
           if (!a.lastMsgTime && !b.lastMsgTime) return 0;
           if (!a.lastMsgTime) return 1;
           if (!b.lastMsgTime) return -1;
-          return 0; // Keep order
+          // Sort berdasarkan waktu terbaru
+          const getTimeValue = (timeStr) => {
+            if (timeStr === "Baru saja") return Date.now();
+            if (timeStr.includes("menit")) return Date.now() - parseInt(timeStr) * 60000;
+            if (timeStr.includes("jam")) return Date.now() - parseInt(timeStr) * 3600000;
+            if (timeStr.includes("hari")) return Date.now() - parseInt(timeStr) * 86400000;
+            return 0;
+          };
+          return getTimeValue(b.lastMsgTime) - getTimeValue(a.lastMsgTime);
         });
 
         users.value = [...usersData];
@@ -150,359 +192,181 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="fixed inset-0 flex flex-col bg-gradient-to-br from-pink-100 via-rose-100 to-purple-100 h-[100dvh] w-full overflow-hidden">
+  <div class="fixed inset-0 flex flex-col bg-gradient-to-b from-pink-50 via-rose-50 to-orange-50 h-[100dvh] w-full overflow-hidden">
     
-    <!-- Background Animasi Gemess -->
+    <!-- Dekorasi Lucu (Ringan, Tanpa Animasi Berat) -->
     <div class="absolute inset-0 pointer-events-none overflow-hidden">
-      <div class="absolute top-5 left-3 animate-float-slow">
-        <span class="text-3xl">🌸</span>
-      </div>
-      <div class="absolute top-1/4 right-2 animate-bounce-gentle">
-        <span class="text-2xl">💖</span>
-      </div>
-      <div class="absolute bottom-1/3 left-2 animate-spin-soft">
-        <span class="text-2xl">✨</span>
-      </div>
-      <div class="absolute bottom-10 right-3 animate-float-delay">
-        <span class="text-3xl">🐱</span>
-      </div>
-      <div class="absolute top-1/2 left-1 animate-wiggle">
-        <span class="text-2xl">🎀</span>
-      </div>
-      <div class="absolute top-1/3 left-1/4 animate-pulse-soft">
-        <span class="text-4xl">💕</span>
-      </div>
-      <div class="absolute bottom-1/4 right-1/3 animate-float-slow">
-        <span class="text-2xl">🦄</span>
-      </div>
-      
-      <!-- Love Rain Animation -->
-      <div v-for="i in 8" :key="i" class="love-rain" :style="{ left: i * 12 + '%', animationDelay: i * 0.6 + 's' }">
-        💕
-      </div>
+      <div class="absolute top-5 left-3 opacity-30 text-2xl">🌸</div>
+      <div class="absolute top-1/4 right-2 opacity-30 text-xl">💖</div>
+      <div class="absolute bottom-1/3 left-2 opacity-30 text-xl">✨</div>
+      <div class="absolute bottom-10 right-3 opacity-30 text-2xl">🐱</div>
+      <div class="absolute top-1/2 left-1 opacity-30 text-xl">🎀</div>
+      <div class="absolute bottom-1/4 right-1/3 opacity-30 text-xl">🦄</div>
     </div>
 
-    <!-- Floating Hearts Effect -->
+    <!-- Floating Heart Effect (Ringan) -->
     <div v-if="showLoveAnimation" class="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
-      <div class="heart-explosion">
-        <span class="text-6xl animate-bounce-heart">💖</span>
-        <span class="text-5xl absolute animate-float-up" style="left: -40px">💕</span>
-        <span class="text-5xl absolute animate-float-up-delay" style="right: -40px">💗</span>
-        <span class="text-4xl absolute animate-float-up-slow" style="top: -50px">💝</span>
-      </div>
+      <div class="text-6xl font-bold animate-ping-once">💖</div>
     </div>
 
-    <!-- Header Gemess -->
-    <header class="bg-white/95 backdrop-blur-xl border-b-4 border-pink-300 px-6 py-5 flex justify-between items-center shrink-0 z-50 shadow-2xl">
+    <!-- Header Lucu Sesuai Chat -->
+    <header class="bg-white/95 backdrop-blur-sm border-b-4 border-pink-200 px-5 py-4 flex justify-between items-center shrink-0 z-50 shadow-sm">
       <div>
-        <h1 class="text-2xl font-black bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent tracking-tight">
-          💬 Chatty Pink
+        <h1 class="text-xl font-black bg-gradient-to-r from-pink-500 to-orange-500 bg-clip-text text-transparent flex items-center gap-1">
+          💬 Chatty
+          <span class="text-base">🐣</span>
         </h1>
-        <div class="flex items-center gap-1 mt-1">
-          <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          <p class="text-[11px] font-bold text-pink-500 uppercase tracking-widest">
-            {{ users.filter(u => u.isOnline).length }} Teman Online
+        <div class="flex items-center gap-1 mt-0.5">
+          <div class="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+          <p class="text-[10px] font-bold text-pink-400">
+            {{ users.filter(u => u.isOnline).length }} teman online
           </p>
         </div>
       </div>
 
       <div class="flex items-center gap-2">
         <button @click="navigateTo('/settings')" 
-                class="w-10 h-10 bg-gradient-to-r from-pink-100 to-rose-100 text-pink-600 rounded-full flex items-center justify-center hover:from-pink-200 hover:to-rose-200 transition-all active:scale-90 shadow-md">
-          <span class="text-lg">⚙️</span>
+                class="w-9 h-9 bg-pink-100 text-pink-500 rounded-full flex items-center justify-center active:scale-95 transition-transform shadow-sm">
+          <span class="text-base">😊</span>
         </button>
 
         <button @click="$auth.signOut()" 
-                class="w-10 h-10 bg-white/80 rounded-full flex items-center justify-center text-pink-400 hover:text-pink-600 transition-all active:scale-90 shadow-md hover:shadow-lg">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                class="w-9 h-9 bg-white rounded-full flex items-center justify-center text-pink-400 active:scale-95 transition-transform shadow-sm border border-pink-100">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" stroke-width="2"/>
           </svg>
         </button>
       </div>
     </header>
 
     <!-- Search Bar -->
-    <div class="px-6 py-3">
-      <div class="bg-white/80 backdrop-blur-sm rounded-2xl p-3 flex items-center gap-2 text-pink-400 shadow-lg border border-pink-200">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-width="2.5"/>
+    <div class="px-4 pt-3 pb-2">
+      <div class="bg-white/90 rounded-2xl px-4 py-2.5 flex items-center gap-2 shadow-sm border border-pink-100">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-pink-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-width="2"/>
         </svg>
-        <input type="text" placeholder="Cari teman lucu..." class="bg-transparent flex-1 outline-none text-sm text-gray-700 placeholder:text-pink-300">
-        <span class="text-sm">💕</span>
+        <input 
+          v-model="searchQuery"
+          type="text" 
+          placeholder="Cari teman..." 
+          class="bg-transparent flex-1 outline-none text-sm text-gray-700 placeholder:text-pink-300"
+        >
+        <span class="text-sm text-pink-400">🔍</span>
       </div>
     </div>
 
     <!-- List Chat -->
-    <main class="flex-1 overflow-y-auto pt-2 pb-24 px-4">
+    <main class="flex-1 overflow-y-auto px-4 pb-28 pt-1">
       
       <!-- Empty State -->
-      <div v-if="users.length === 0" class="flex flex-col items-center justify-center h-64">
-        <div class="relative">
-          <div class="w-24 h-24 bg-gradient-to-br from-pink-300 to-rose-400 rounded-full flex items-center justify-center shadow-2xl animate-float-gentle">
-            <span class="text-5xl">💕</span>
-          </div>
-          <div class="absolute -top-2 -right-2 animate-bounce">
-            <span class="text-3xl">✨</span>
-          </div>
+      <div v-if="filteredUsers().length === 0" class="flex flex-col items-center justify-center h-64">
+        <div class="w-20 h-20 bg-gradient-to-br from-pink-200 to-orange-200 rounded-full flex items-center justify-center shadow-md">
+          <span class="text-4xl">💕</span>
         </div>
-        <p class="text-base font-bold text-pink-600 mt-6">Belum ada teman nih 😢</p>
-        <p class="text-sm text-pink-500 mt-2 text-center px-8">
-          Ajak temanmu untuk bergabung<br>
-dan mulai ngobrol seru! 🥰
+        <p class="text-sm font-bold text-pink-500 mt-4">Belum ada teman nih 😢</p>
+        <p class="text-xs text-pink-400 mt-1 text-center px-8">
+          Ajak temanmu dan mulai ngobrol seru! 🥰
         </p>
       </div>
       
-      <!-- User List -->
-      <div v-for="(user, idx) in users" :key="user.uid" 
+      <!-- User List - Style Sesuai Chat -->
+      <div v-for="user in filteredUsers()" :key="user.uid" 
            @click="navigateTo(`/chat/${user.uid}`)"
-           class="flex items-center px-4 py-3 mb-2 bg-white/80 backdrop-blur-sm rounded-2xl hover:bg-white/95 active:bg-pink-50 transition-all cursor-pointer group shadow-md hover:shadow-xl border border-pink-100 animate-slide-in"
-           :style="{ animationDelay: idx * 0.05 + 's' }">
+           class="flex items-center gap-3 px-3 py-2.5 mb-2 bg-white rounded-2xl active:bg-pink-50 transition-all cursor-pointer shadow-sm border border-pink-100">
         
+        <!-- Avatar dengan Status -->
         <div class="relative shrink-0">
-          <div class="w-14 h-14 bg-gradient-to-br from-pink-400 to-rose-500 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg transition-transform group-active:scale-95 overflow-hidden">
+          <div class="w-12 h-12 bg-gradient-to-br from-pink-400 to-orange-400 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm overflow-hidden">
             <img v-if="user.photoURL" :src="user.photoURL" class="w-full h-full object-cover" />
-            <span v-else>{{ user.displayName?.charAt(0).toUpperCase() }}</span>
+            <span v-else>{{ user.displayName?.charAt(0).toUpperCase() || '?' }}</span>
           </div>
-          <div v-if="user.isOnline" class="absolute bottom-0 right-0">
-            <div class="w-4 h-4 bg-green-500 rounded-full animate-ping absolute"></div>
-            <div class="w-4 h-4 bg-green-500 rounded-full relative ring-2 ring-white"></div>
+          <div class="absolute -bottom-0.5 -right-0.5">
+            <div v-if="user.isOnline" class="w-3 h-3 bg-green-400 rounded-full ring-2 ring-white"></div>
+            <div v-else class="w-3 h-3 bg-gray-300 rounded-full ring-2 ring-white"></div>
           </div>
-          <div v-else class="absolute bottom-0 right-0 w-4 h-4 bg-gray-400 rounded-full ring-2 ring-white"></div>
         </div>
         
-        <div class="ml-3 flex-1 overflow-hidden">
-          <div class="flex justify-between items-center mb-1">
-            <h2 class="font-bold text-[15px] text-gray-800 truncate">
-              {{ user.displayName }}
-              <span v-if="user.isOnline" class="text-[10px] text-green-500 ml-1">●</span>
+        <!-- Info Chat -->
+        <div class="flex-1 overflow-hidden">
+          <div class="flex justify-between items-center mb-0.5">
+            <h2 class="font-bold text-sm text-gray-800 truncate max-w-[140px]">
+              {{ user.displayName || 'Pengguna' }}
             </h2>
             <span class="text-[9px] text-pink-400 font-medium whitespace-nowrap ml-2">
-              {{ user.lastMsgTime || 'Baru bergabung' }}
+              {{ user.lastMsgTime || 'Baru' }}
             </span>
           </div>
           
-          <div class="flex items-center gap-1.5">
-            <div v-if="user.lastMsgStatus === 'read'" class="flex shrink-0">
-              <span class="text-[10px] text-pink-500">✔✔</span>
-            </div>
-            <div v-else-if="user.lastMsgStatus === 'sent'" class="flex shrink-0">
-              <span class="text-[10px] text-pink-300">✔</span>
-            </div>
+          <div class="flex items-center gap-1">
+            <!-- Status Centang -->
+            <span v-if="user.lastMsgStatus === 'read'" class="text-[10px] text-pink-400 shrink-0">✔✔</span>
+            <span v-else-if="user.lastMsgStatus === 'sent'" class="text-[10px] text-pink-200 shrink-0">✔</span>
             
-            <p :class="user.unreadCount > 0 ? 'text-gray-900 font-bold' : 'text-gray-500'" 
-               class="text-[12px] truncate leading-tight flex-1">
-              <span v-if="user.unreadCount > 0" class="font-bold text-pink-600">• </span>
-              {{ user.lastMessage || '💬 Belum ada pesan' }}
+            <!-- Pesan Terakhir -->
+            <p :class="user.unreadCount > 0 ? 'text-gray-800 font-semibold' : 'text-gray-400'" 
+               class="text-[11px] truncate flex-1">
+              <span v-if="user.unreadCount > 0" class="text-pink-500 font-bold mr-0.5">●</span>
+              {{ user.lastMessage }}
             </p>
           </div>
         </div>
 
+        <!-- Badge Unread -->
         <div v-if="user.unreadCount > 0" 
-             class="ml-3 bg-gradient-to-r from-pink-500 to-rose-500 text-white text-[11px] font-bold min-w-[24px] h-6 flex items-center justify-center rounded-full shadow-lg animate-pulse">
+             class="shrink-0 bg-gradient-to-r from-pink-500 to-orange-500 text-white text-[10px] font-bold min-w-[20px] h-5 flex items-center justify-center rounded-full shadow-sm">
           {{ user.unreadCount }}
         </div>
       </div>
 
-      <!-- Suggestion Message -->
-      <div v-if="users.length > 0" class="text-center py-6">
-        <p class="text-[10px] text-pink-400 animate-pulse">
-          💕 {{ users.filter(u => u.isOnline).length }} teman sedang online 💕
+      <!-- Info Online Count -->
+      <div v-if="filteredUsers().length > 0" class="text-center py-4">
+        <p class="text-[9px] text-pink-300 font-medium">
+          💕 {{ users.filter(u => u.isOnline).length }} teman online • {{ filteredUsers().length }} total chat 💕
         </p>
       </div>
     </main>
 
-    <!-- Bottom Navigation Gemess -->
-    <nav class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t-4 border-pink-300 px-8 py-3 flex justify-around items-center z-50 shadow-[0_-4px_20px_rgba(236,72,153,0.1)]">
-      <button @click="navigateTo('/')" class="flex flex-col items-center gap-1 transition-all active:scale-90 group">
-        <div class="p-2.5 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg group-hover:shadow-xl">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Bottom Navigation Simple -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t-2 border-pink-100 px-6 py-2 flex justify-around items-center z-50">
+      <button @click="navigateTo('/')" class="flex flex-col items-center gap-0.5 active:scale-95 transition-transform">
+        <div class="p-2 rounded-full bg-gradient-to-r from-pink-500 to-orange-500 text-white shadow-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke-width="2"/>
           </svg>
         </div>
-        <span class="text-[10px] font-black text-pink-500 uppercase tracking-widest">Chat</span>
+        <span class="text-[9px] font-bold text-pink-500">Chat</span>
       </button>
 
-      <button @click="navigateTo('/stories')" class="flex flex-col items-center gap-1 transition-all active:scale-90 group">
-        <div class="p-2.5 rounded-2xl bg-pink-50 text-pink-400 group-hover:bg-pink-100 group-hover:text-pink-500 transition-all">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <button @click="navigateTo('/stories')" class="flex flex-col items-center gap-0.5 active:scale-95 transition-transform">
+        <div class="p-2 rounded-full bg-pink-50 text-pink-400">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" stroke-width="2"/>
+            <path d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" stroke-width="2"/>
           </svg>
         </div>
-        <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-pink-400">Status</span>
+        <span class="text-[9px] font-bold text-gray-400">Status</span>
       </button>
 
-      <button @click="triggerLoveAnimation" class="flex flex-col items-center gap-1 transition-all active:scale-90 group">
-        <div class="p-2.5 rounded-2xl bg-pink-50 text-pink-400 group-hover:bg-pink-100 group-hover:text-pink-500 transition-all">
-          <span class="text-2xl">💕</span>
+      <button @click="triggerLoveAnimation" class="flex flex-col items-center gap-0.5 active:scale-95 transition-transform">
+        <div class="p-2 rounded-full bg-pink-50 text-pink-400">
+          <span class="text-xl leading-5">💕</span>
         </div>
-        <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-pink-400">Love</span>
+        <span class="text-[9px] font-bold text-gray-400">Love</span>
       </button>
     </nav>
   </div>
 </template>
 
 <style scoped>
-/* Animasi Gemess */
-@keyframes bounce-gentle {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-15px); }
-}
-
-@keyframes float-slow {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  50% { transform: translateY(-20px) rotate(5deg); }
-}
-
-@keyframes float-delay {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-12px); }
-}
-
-@keyframes spin-soft {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@keyframes wiggle {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(10deg); }
-  75% { transform: rotate(-10deg); }
-}
-
-@keyframes pulse-soft {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.2); opacity: 0.8; }
-}
-
-@keyframes float-gentle {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-15px); }
-}
-
-@keyframes bounce-heart {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.5); opacity: 0.8; }
-}
-
-@keyframes float-up {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-100px) scale(1.5); opacity: 0; }
-}
-
-@keyframes float-up-delay {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-80px) scale(1.3); opacity: 0; }
-}
-
-@keyframes float-up-slow {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-120px) scale(1.8); opacity: 0; }
-}
-
-@keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes love-rain-fall {
+/* Animasi Ringan - Tidak Membuat Lag */
+@keyframes ping-once {
   0% {
-    transform: translateY(-20px) rotate(0deg);
-    opacity: 0;
-  }
-  10% {
-    opacity: 0.5;
-  }
-  90% {
-    opacity: 0.5;
-  }
-  100% {
-    transform: translateY(100vh) rotate(360deg);
-    opacity: 0;
-  }
-}
-
-/* Class Animations */
-.animate-bounce-gentle {
-  animation: bounce-gentle 3s ease-in-out infinite;
-}
-
-.animate-float-slow {
-  animation: float-slow 6s ease-in-out infinite;
-}
-
-.animate-float-delay {
-  animation: float-delay 5s ease-in-out infinite;
-  animation-delay: 1s;
-}
-
-.animate-spin-soft {
-  animation: spin-soft 8s linear infinite;
-}
-
-.animate-wiggle {
-  animation: wiggle 3s ease-in-out infinite;
-}
-
-.animate-pulse-soft {
-  animation: pulse-soft 2s ease-in-out infinite;
-}
-
-.animate-float-gentle {
-  animation: float-gentle 4s ease-in-out infinite;
-}
-
-.animate-bounce-heart {
-  animation: bounce-heart 0.5s ease-in-out;
-}
-
-.animate-float-up {
-  animation: float-up 1s ease-out forwards;
-}
-
-.animate-float-up-delay {
-  animation: float-up-delay 1s ease-out forwards;
-  animation-delay: 0.2s;
-}
-
-.animate-float-up-slow {
-  animation: float-up-slow 1.2s ease-out forwards;
-}
-
-.animate-slide-in {
-  animation: slide-in 0.3s ease-out forwards;
-  opacity: 0;
-}
-
-/* Love Rain */
-.love-rain {
-  position: absolute;
-  top: -20px;
-  font-size: 20px;
-  animation: love-rain-fall 5s linear infinite;
-  pointer-events: none;
-  opacity: 0.5;
-}
-
-/* Heart Explosion */
-.heart-explosion {
-  position: relative;
-  animation: heart-explosion 0.5s ease-out;
-}
-
-@keyframes heart-explosion {
-  0% {
-    transform: scale(0);
+    transform: scale(0.5);
     opacity: 0;
   }
   50% {
     transform: scale(1.2);
+    opacity: 0.8;
   }
   100% {
     transform: scale(1);
@@ -510,7 +374,11 @@ dan mulai ngobrol seru! 🥰
   }
 }
 
-/* Scrollbar */
+.animate-ping-once {
+  animation: ping-once 0.3s ease-out forwards;
+}
+
+/* Scrollbar Disabled */
 main::-webkit-scrollbar {
   display: none;
 }
@@ -523,5 +391,19 @@ main {
 /* Tap Highlight Remove */
 * {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Transisi Halus */
+.active\:scale-95:active {
+  transform: scale(0.95);
+}
+
+/* Hover Effect Ringan */
+.bg-white {
+  transition: all 0.15s ease;
+}
+
+.bg-white:active {
+  background-color: #fdf2f8;
 }
 </style>
